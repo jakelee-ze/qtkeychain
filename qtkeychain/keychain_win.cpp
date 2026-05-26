@@ -150,7 +150,8 @@ void WritePasswordJobPrivate::scheduledStart()
     CREDENTIALW cred = {};
     cred.Comment = const_cast<wchar_t *>(PRODUCT_NAME.data());
     cred.Type = CRED_TYPE_GENERIC;
-    cred.TargetName = const_cast<wchar_t *>(reinterpret_cast<const wchar_t *>(key.utf16()));
+    cred.TargetName = const_cast<wchar_t *>(reinterpret_cast<const wchar_t *>(service.utf16()));
+    cred.UserName = const_cast<wchar_t *>(reinterpret_cast<const wchar_t *>(key.utf16()));
     cred.Persist = CRED_PERSIST_ENTERPRISE;
 
     QByteArray buffer;

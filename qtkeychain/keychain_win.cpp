@@ -104,7 +104,8 @@ void ReadPasswordJobPrivate::scheduledStart()
     PCREDENTIALW cred = {};
     CredentialDeleter deleter(cred);
 
-    if (!CredReadW(reinterpret_cast<const wchar_t *>(key.utf16()), CRED_TYPE_GENERIC, 0, &cred)) {
+    if (!CredReadW(reinterpret_cast<const wchar_t *>(service.utf16()), CRED_TYPE_GENERIC, 0,
+                   &cred)) {
         Error err;
         QString msg;
         switch (GetLastError()) {
@@ -120,6 +121,10 @@ void ReadPasswordJobPrivate::scheduledStart()
 
         q->emitFinishedWithError(err, msg);
         return;
+    }
+
+    if (cred->UserName) {
+        key = QString::fromWCharArray(cred->UserName);
     }
 
     if (cred->AttributeCount == 0) {
@@ -226,7 +231,7 @@ void WritePasswordJobPrivate::scheduledStart()
 
 void DeletePasswordJobPrivate::scheduledStart()
 {
-    if (!CredDeleteW(reinterpret_cast<const wchar_t *>(key.utf16()), CRED_TYPE_GENERIC, 0)) {
+    if (!CredDeleteW(reinterpret_cast<const wchar_t *>(service.utf16()), CRED_TYPE_GENERIC, 0)) {
         Error err;
         QString msg;
         switch (GetLastError()) {

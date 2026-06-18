@@ -83,7 +83,7 @@ struct ErrorDescription
 
 - (instancetype)initWithJob:(Job *)job andPrivateJob:(JobPrivate *)privateJob;
 - (void)keychainTaskFinished;
-- (void)keychainReadTaskFinished:(NSData *)retrievedData;
+- (void)keychainReadTaskFinished:(NSData *)retrievedData withAccount:(NSString *)account;
 - (void)keychainTaskFinishedWithError:(OSStatus)status
                    descriptiveMessage:(NSString *)descriptiveMessage;
 
@@ -120,7 +120,7 @@ struct ErrorDescription
     }
 }
 
-- (void)keychainReadTaskFinished:(NSData *)retrievedData
+- (void)keychainReadTaskFinished:(NSData *)retrievedData withAccount:(NSString *)account
 {
     if (_privateJob) {
         _privateJob->data.clear();
@@ -131,6 +131,9 @@ struct ErrorDescription
     }
 
     if (_job) {
+        if (account != nil) {
+            _job->setKey(QString::fromNSString(account));
+        }
         _job->emitFinished();
     }
 }
@@ -155,22 +158,26 @@ struct ErrorDescription
 static void StartReadPassword(const QString &service, const QString &key,
                               AppleKeychainInterface *const interface)
 {
+    Q_UNUSED(key)
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        // Read by service name only: return the data along with the item's
+        // attributes so the account (username) can be reported back as the key.
         NSDictionary *const query = @{
             (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassGenericPassword,
             (__bridge NSString *)kSecAttrService : service.toNSString(),
-            (__bridge NSString *)kSecAttrAccount : key.toNSString(),
             (__bridge NSString *)kSecReturnData : @YES,
+            (__bridge NSString *)kSecReturnAttributes : @YES,
         };
 
-        CFTypeRef dataRef = nil;
-        const OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &dataRef);
+        CFTypeRef resultRef = nil;
+        const OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &resultRef);
 
         if (status == errSecSuccess) {
-            const CFDataRef castedDataRef = (CFDataRef)dataRef;
-            NSData *const data = (__bridge NSData *)castedDataRef;
+            NSDictionary *const result = (__bridge NSDictionary *)resultRef;
+            NSData *const data = result[(__bridge NSString *)kSecValueData];
+            NSString *const account = result[(__bridge NSString *)kSecAttrAccount];
             dispatch_async(dispatch_get_main_queue(), ^{
-                [interface keychainReadTaskFinished:data];
+                [interface keychainReadTaskFinished:data withAccount:account];
                 [interface release];
             });
         } else {
@@ -183,8 +190,8 @@ static void StartReadPassword(const QString &service, const QString &key,
             });
         }
 
-        if (dataRef) {
-            CFRelease(dataRef);
+        if (resultRef) {
+            CFRelease(resultRef);
         }
     });
 }
@@ -239,11 +246,12 @@ static void StartWritePassword(const QString &service, const QString &key, const
 static void StartDeletePassword(const QString &service, const QString &key,
                                 AppleKeychainInterface *const interface)
 {
+    Q_UNUSED(key)
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        // Delete by service name only, regardless of the account (username).
         NSDictionary *const query = @{
             (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassGenericPassword,
             (__bridge NSString *)kSecAttrService : service.toNSString(),
-            (__bridge NSString *)kSecAttrAccount : key.toNSString(),
         };
 
         const OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);

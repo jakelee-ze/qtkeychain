@@ -144,9 +144,11 @@ struct ErrorDescription
     const auto localisedDescriptiveMessage = Job::tr([descriptiveMessage UTF8String]);
 
     const ErrorDescription error = ErrorDescription::fromStatus(status);
+    const auto messageWithCode =
+            QStringLiteral("%1 (OSStatus %2)").arg(error.message).arg(static_cast<long>(status));
     const auto fullMessage = localisedDescriptiveMessage.isEmpty()
-            ? error.message
-            : QStringLiteral("%1: %2").arg(localisedDescriptiveMessage, error.message);
+            ? messageWithCode
+            : QStringLiteral("%1: %2").arg(localisedDescriptiveMessage, messageWithCode);
 
     if (_job) {
         _job->emitFinishedWithError(error.code, fullMessage);
@@ -249,12 +251,37 @@ static void StartDeletePassword(const QString &service, const QString &key,
     Q_UNUSED(key)
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
         // Delete by service name only, regardless of the account (username).
-        NSDictionary *const query = @{
+        //
+        // A single SecItemDelete call with a service-only query fails on the legacy
+        // macOS keychain when more than one item matches (OSStatus -25244,
+        // errSecInvalidOwnerEdit). Resolve every matching item to its own reference
+        // and delete them one at a time instead.
+        NSDictionary *const findQuery = @{
             (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassGenericPassword,
             (__bridge NSString *)kSecAttrService : service.toNSString(),
+            (__bridge NSString *)kSecMatchLimit : (__bridge NSString *)kSecMatchLimitAll,
+            (__bridge NSString *)kSecReturnRef : @YES,
         };
 
-        const OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+        CFTypeRef resultRef = nil;
+        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)findQuery, &resultRef);
+
+        if (status == errSecSuccess) {
+            NSArray *const items = (__bridge NSArray *)resultRef;
+            for (id item in items) {
+                NSDictionary *const deleteQuery = @{
+                    (__bridge NSString *)kSecValueRef : item,
+                };
+                status = SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
+                if (status != errSecSuccess) {
+                    break;
+                }
+            }
+        }
+
+        if (resultRef) {
+            CFRelease(resultRef);
+        }
 
         if (status == errSecSuccess) {
             dispatch_async(dispatch_get_main_queue(), ^{

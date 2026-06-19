@@ -268,13 +268,16 @@ static void StartDeletePassword(const QString &service, const QString &key,
 
         if (status == errSecSuccess) {
             NSArray *const items = (__bridge NSArray *)resultRef;
+            // Try to delete every matching item even if some deletions fail, so a
+            // single failing entry does not leave the rest behind. Remember the last
+            // error encountered to report it afterwards.
             for (id item in items) {
                 NSDictionary *const deleteQuery = @{
                     (__bridge NSString *)kSecValueRef : item,
                 };
-                status = SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
-                if (status != errSecSuccess) {
-                    break;
+                const OSStatus deleteStatus = SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
+                if (deleteStatus != errSecSuccess) {
+                    status = deleteStatus;
                 }
             }
         }
